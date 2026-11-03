@@ -26,7 +26,7 @@ def test_matches_pillow_in_interior():
 def test_roi_only_changes_selected_region():
     img = _noisy_image()
     flt = get_filter("median")
-    out = apply_filter(img, flt, {"kernel_size": 3}, Rect(10, 5, 20, 15))
+    out = apply_filter(img, flt, {"kernel_size": 3}, Rect(10, 5, 20, 15)).image
     outside = np.ones(img.shape[:2], bool)
     outside[5:20, 10:30] = False
     assert np.array_equal(out[outside], img[outside])

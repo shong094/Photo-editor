@@ -7,7 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from ..core.image_io import decode_image, encode_image
 from ..core.registry import get_filter, list_filters
 from ..core.roi import Rect, apply_filter
-from .schemas import ProcessRequest, ProcessResponse
+from .schemas import ProcessRequest, ProcessResponse, ViewModel
 
 router = APIRouter(prefix="/api")
 
@@ -34,7 +34,11 @@ async def process(name: str, req: ProcessRequest) -> ProcessResponse:
         params = flt.validate_params(req.params)
         image = decode_image(req.image)
         roi = Rect(**req.roi.model_dump()) if req.roi else None
-        result = await run_in_threadpool(apply_filter, image, flt, params, roi)
+        output = await run_in_threadpool(apply_filter, image, flt, params, roi)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return ProcessResponse(image=encode_image(result))
+    return ProcessResponse(
+        image=encode_image(output.image),
+        views=[ViewModel(label=label, image=encode_image(view)) for label, view in output.views],
+        result_label=output.result_label,
+    )

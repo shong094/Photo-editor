@@ -73,6 +73,7 @@ class ToolPanel(ttk.Frame):
                 from_=p["min"] if p["min"] is not None else -1e9,
                 to=p["max"] if p["max"] is not None else 1e9,
                 increment=p["step"] or 1,
+                format="%.2f" if t == "float" else "",
             ).pack(side="right")
         return var
 

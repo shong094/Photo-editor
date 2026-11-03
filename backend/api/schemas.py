@@ -19,5 +19,12 @@ class ProcessRequest(BaseModel):
     roi: RectModel | None = Field(default=None, description="處理範圍；省略則處理整張")
 
 
+class ViewModel(BaseModel):
+    label: str
+    image: str = Field(description="base64 編碼的 PNG")
+
+
 class ProcessResponse(BaseModel):
     image: str = Field(description="base64 編碼的 PNG")
+    views: list[ViewModel] = Field(default_factory=list, description="要一併顯示的中間結果")
+    result_label: str = "結果"

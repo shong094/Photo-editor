@@ -7,10 +7,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
-from ..api_client import ApiClient, ApiError
+from ..api_client import ApiClient, ApiError, FilterResult
 from ..document import ImageDocument
-from .canvas_view import ImageCanvas, Rect
+from .canvas_view import Rect
 from .tool_panel import ToolPanel
+from .workspace import Workspace
 
 FILETYPES = [
     ("影像檔", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
@@ -25,9 +26,11 @@ class MainWindow:
         self.doc = ImageDocument()
         self._results: queue.Queue[Callable[[], None]] = queue.Queue()
         self._busy = False
+        # 並排比較中的功能與它的輸入影像；調整參數重算時從同一張原圖開始
+        self._comparison: tuple[str, Any] | None = None
 
         root.title("影像編輯軟體")
-        root.geometry("1100x720")
+        root.geometry("1280x720")
         self._build_menu()
         self._build_layout()
         self._bind_keys()
@@ -56,14 +59,20 @@ class MainWindow:
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True)
 
-        self.canvas = ImageCanvas(body, on_selection_change=self._on_selection_change)
-        self.canvas.pack(side="left", fill="both", expand=True)
-
+        # 先放側欄，視窗變窄時才不會被工作區擠掉
         side = ttk.Frame(body, width=240)
         side.pack(side="right", fill="y")
         side.pack_propagate(False)
         self.tool_panel = ToolPanel(side, on_apply=self.apply_filter)
         self.tool_panel.pack(fill="both", expand=True)
+
+        self.workspace = Workspace(
+            body,
+            on_selection_change=self._on_selection_change,
+            on_close_comparison=self._show_single,
+        )
+        self.workspace.pack(side="left", fill="both", expand=True)
+        self.canvas = self.workspace.main_canvas
 
         self.status = tk.StringVar(value="就緒")
         self.selection_info = tk.StringVar(value="")
@@ -130,7 +139,7 @@ class MainWindow:
         except OSError as e:
             self._show_error(f"無法開啟檔案：{e}")
             return
-        self.canvas.set_image(self.doc.image)
+        self._show_single(keep_selection=False)
         w, h = self.doc.image.size
         self.status.set(f"已開啟 {self.doc.path.name} ({w}x{h})")
 
@@ -162,11 +171,20 @@ class MainWindow:
         ):
             return
 
-        image = self.doc.image
+        # 比較模式下重按同一功能：視為調整參數，從原圖重算而不是疊加在結果上
+        recompute = self._comparison is not None and self._comparison[0] == name
+        image = self._comparison[1] if recompute else self.doc.image
 
-        def done(result) -> None:
-            self.doc.update(result)
-            self.canvas.set_image(self.doc.image, keep_selection=True)
+        def done(result: FilterResult) -> None:
+            if recompute:
+                self.doc.replace(result.image)
+            else:
+                self.doc.update(result.image)
+            if result.views:
+                self._comparison = (name, image)
+                self.workspace.show_comparison(image, [*result.views, (result.result_label, result.image)])
+            else:
+                self._show_single()
             self.status.set("處理完成")
 
         self._run_async(lambda: self.api.apply_filter(name, image, params, roi), done, "處理中...")
@@ -174,14 +192,18 @@ class MainWindow:
     def undo(self) -> None:
         if self.doc.can_undo() and not self._busy:
             self.doc.undo()
-            self.canvas.set_image(self.doc.image, keep_selection=True)
+            self._show_single()
             self.status.set("已復原")
 
     def redo(self) -> None:
         if self.doc.can_redo() and not self._busy:
             self.doc.redo()
-            self.canvas.set_image(self.doc.image, keep_selection=True)
+            self._show_single()
             self.status.set("已重做")
+
+    def _show_single(self, keep_selection: bool = True) -> None:
+        self._comparison = None
+        self.workspace.show_single(self.doc.image, keep_selection=keep_selection)
 
     def _on_selection_change(self, rect: Rect | None) -> None:
         if rect is None:

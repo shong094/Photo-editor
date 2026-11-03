@@ -41,6 +41,11 @@ class ImageDocument:
         self._redo.clear()
         self.image = new_image
 
+    def replace(self, new_image: Image.Image) -> None:
+        """取代目前的處理結果（調整參數重算時用），不新增復原紀錄。"""
+        self._redo.clear()
+        self.image = new_image
+
     def can_undo(self) -> bool:
         return bool(self._undo)
 

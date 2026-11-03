@@ -49,6 +49,18 @@ class ParamSpec:
         return value
 
 
+@dataclass
+class FilterOutput:
+    """功能的輸出：最終結果，以及要一併顯示給使用者的中間結果。
+
+    views 不為空時，前端會以「原圖 | 各中間結果 | 最終結果」並排顯示。
+    """
+
+    image: np.ndarray
+    views: list[tuple[str, np.ndarray]] = field(default_factory=list)
+    result_label: str = "結果"
+
+
 class ImageFilter(ABC):
     """影像處理功能基底類別。"""
 
@@ -74,6 +86,10 @@ class ImageFilter(ABC):
         image: HxWxC 的 uint8 陣列（C 為 3 或 4）。
         回傳相同形狀與型別的陣列。
         """
+
+    def run(self, image: np.ndarray, **params: Any) -> FilterOutput:
+        """執行功能。需要提供中間結果的功能覆寫此方法。"""
+        return FilterOutput(self.process(image, **params))
 
     def describe(self) -> dict[str, Any]:
         return {

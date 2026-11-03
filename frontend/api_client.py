@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -13,6 +14,13 @@ Rect = tuple[int, int, int, int]  # (x, y, width, height)
 
 class ApiError(Exception):
     pass
+
+
+@dataclass
+class FilterResult:
+    image: Image.Image
+    views: list[tuple[str, Image.Image]]  # 要一併顯示的中間結果
+    result_label: str
 
 
 class ApiClient:
@@ -45,13 +53,17 @@ class ApiClient:
         image: Image.Image,
         params: dict[str, Any],
         roi: Rect | None = None,
-    ) -> Image.Image:
+    ) -> FilterResult:
         payload: dict[str, Any] = {"image": _encode(image), "params": params}
         if roi is not None:
             x, y, w, h = roi
             payload["roi"] = {"x": x, "y": y, "width": w, "height": h}
         data = self._request("POST", f"/api/filters/{name}", json=payload)
-        return _decode(data["image"])
+        return FilterResult(
+            image=_decode(data["image"]),
+            views=[(v["label"], _decode(v["image"])) for v in data["views"]],
+            result_label=data["result_label"],
+        )
 
 
 def _encode(image: Image.Image) -> str:

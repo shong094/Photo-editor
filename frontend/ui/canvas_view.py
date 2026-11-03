@@ -13,8 +13,15 @@ Rect = tuple[int, int, int, int]  # (x, y, width, height)
 
 
 class ImageCanvas(tk.Canvas):
-    def __init__(self, master: tk.Misc, on_selection_change: Callable[[Rect | None], None] | None = None):
-        super().__init__(master, bg="#2b2b2b", highlightthickness=0, cursor="crosshair")
+    def __init__(
+        self,
+        master: tk.Misc,
+        on_selection_change: Callable[[Rect | None], None] | None = None,
+        selectable: bool = True,
+    ):
+        super().__init__(
+            master, bg="#2b2b2b", highlightthickness=0, cursor="crosshair" if selectable else "",
+        )
         self.on_selection_change = on_selection_change
         self._image: Image.Image | None = None
         self._photo: ImageTk.PhotoImage | None = None
@@ -24,6 +31,8 @@ class ImageCanvas(tk.Canvas):
         self._selection: Rect | None = None
 
         self.bind("<Configure>", lambda e: self._redraw())
+        if not selectable:
+            return
         self.bind("<ButtonPress-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
