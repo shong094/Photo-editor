@@ -59,10 +59,6 @@ class MainWindow:
         edit_menu.add_separator()
         edit_menu.add_command(label="取消選取", accelerator="Esc", command=lambda: self.canvas.clear_selection())
         menubar.add_cascade(label="編輯", menu=edit_menu)
-
-        tools_menu = tk.Menu(menubar, tearoff=False)
-        tools_menu.add_command(label="製作 GIF...", accelerator="Ctrl+G", command=self.open_gif_maker)
-        menubar.add_cascade(label="工具", menu=tools_menu)
         self.root.config(menu=menubar)
 
     def _build_layout(self) -> None:
@@ -83,6 +79,11 @@ class MainWindow:
             side, on_tool_change=self._on_tool_change, on_settings_change=self._on_brush_change,
         )
         self.brush_panel.pack(fill="x", padx=8, pady=(8, 0))
+        # GIF 放在側欄最下方，功能變多時也不會被擠出畫面
+        gif = ttk.LabelFrame(side, text="GIF 動畫", padding=6)
+        gif.pack(side="bottom", fill="x", padx=8, pady=8)
+        ttk.Label(gif, text="把多張圖片串成會動的 GIF", foreground="#666").pack(anchor="w")
+        ttk.Button(gif, text="製作 GIF...  (Ctrl+G)", command=self.open_gif_maker).pack(fill="x", pady=(4, 0))
         self.tool_panel = ToolPanel(side, on_apply=self.apply_filter)
         self.tool_panel.pack(fill="both", expand=True)
 
