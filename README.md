@@ -22,6 +22,14 @@ python -m venv .venv
 .venv\Scripts\python run_frontend.py
 ```
 
+或用一個指令同時啟動前後端（每次都是最新程式碼，不會有前後端版本不一致的問題）：
+
+```bash
+.venv\Scripts\python launcher.py
+```
+
+改過後端程式碼後，記得重新啟動後端；後端還在跑舊版時，前端會跳出「後端版本較舊」的提示。
+
 API 文件：後端啟動後開啟 http://127.0.0.1:8000/docs
 
 ## 使用方式
@@ -29,7 +37,18 @@ API 文件：後端啟動後開啟 http://127.0.0.1:8000/docs
 1. 「檔案 > 開啟」載入影像
 2. 在影像上按住滑鼠左鍵拖曳框出範圍（右鍵或 Esc 取消選取）
 3. 右側面板調整參數，按「套用」
-4. Ctrl+Z / Ctrl+Y 復原、重做；Ctrl+S 另存新檔
+4. 右上「↶ 復原」「↷ 重做」按鈕，或 Ctrl+Z / Ctrl+Y；Ctrl+S 另存新檔
+
+### 筆刷與橡皮擦
+
+在右上「工具」切換到「筆刷」（Ctrl+B）或「橡皮擦」（Ctrl+E），直接在影像上拖曳；切回框選為 Ctrl+M。
+
+- 三種筆觸：**硬邊筆**（實心、邊緣清楚）、**柔邊筆**（邊緣淡出）、**噴槍**（隨機細點）
+- 可調大小、不透明度；顏色可點色塊開啟調色盤，或點下方的預設色
+- **橡皮擦**會把擦過的地方還原成「開檔時的原圖」，可搭配三種筆觸（例如柔邊擦除）
+  - 注意：濾波效果也會被擦回原圖
+- 有框選範圍時，筆刷與橡皮擦只會作用在範圍內（要改範圍請先切回「框選」）
+- 每一筆都可以復原；拖曳時先顯示預覽線（橡皮擦為灰色），放開後由後端算出真正的筆觸
 
 ### 邊緣偵測子（拉普拉斯）
 
@@ -46,23 +65,30 @@ API 文件：後端啟動後開啟 http://127.0.0.1:8000/docs
 backend/
   app.py              建立 FastAPI app，自動載入所有功能
   api/
-    routes.py         HTTP 路由（GET /api/filters、POST /api/filters/{name}）
+    routes.py         功能路由（GET /api/filters、POST /api/filters/{name}）
+    brush_routes.py   筆刷路由（GET /api/brushes、POST /api/brushes/{name}/stroke）
     schemas.py        請求／回應格式
   core/
     base.py           ImageFilter 基底類別、ParamSpec 參數規格
-    registry.py       功能註冊表（@register）
+    brush.py          Brush 基底類別、筆畫取樣與顏色合成
+    registry.py       通用註冊表（功能用 @register，筆刷用 @register_brush）
     roi.py            只在選取範圍內套用功能
     image_io.py       影像 <-> base64
   filters/
     median.py         中值濾波
     laplacian.py      邊緣偵測子（拉普拉斯銳利濾波）
+  brushes/
+    hard.py           硬邊筆
+    soft.py           柔邊筆
+    spray.py          噴槍
 frontend/
   api_client.py       呼叫後端的唯一入口
   document.py         目前影像 + 復原／重做堆疊
   ui/
     main_window.py    主視窗、選單、狀態列、背景執行請求
     workspace.py      工作區：單圖編輯／多圖並排比較
-    canvas_view.py    影像顯示與滑鼠框選
+    canvas_view.py    影像顯示、滑鼠框選、筆刷預覽
+    brush_panel.py    工具切換與筆刷設定（筆觸、大小、不透明度、顏色）
     tool_panel.py     依後端參數規格自動產生控制項
 tests/
 ```
@@ -93,6 +119,28 @@ class Invert(ImageFilter):
 參數型別支援 `int`、`float`、`bool`、`choice`，後端會自動驗證範圍，ROI 處理也由框架處理。
 
 如果功能要一併顯示中間結果，改為覆寫 `run()` 並回傳 `FilterOutput(結果, [("標籤", 中間結果)], "結果標籤")`，前端就會自動改成並排比較（範例見 `backend/filters/laplacian.py`）。
+
+## 新增筆刷
+
+筆刷只決定「筆印的形狀」，顏色、不透明度、沿路徑取樣都由框架處理。在 `backend/brushes/` 新增一個檔案即可：
+
+```python
+# backend/brushes/square.py
+import numpy as np
+from ..core.brush import Brush, dab_radius, register_brush
+
+@register_brush
+class SquareBrush(Brush):
+    name = "square"
+    display_name = "方頭筆"
+    spacing = 0.15  # 筆印間距（相對於筆刷直徑）
+
+    def dab(self, size, rng):
+        r = dab_radius(size)
+        return np.ones((2 * r + 1, 2 * r + 1), np.float32)  # 每格覆蓋率 0~1
+```
+
+前端的筆刷選項是向後端讀取的，所以不用改前端。
 
 ## 打包成執行檔
 

@@ -4,12 +4,14 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from collections import deque
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
 from ..api_client import ApiClient, ApiError, FilterResult
 from ..document import ImageDocument
-from .canvas_view import Rect
+from .brush_panel import BrushPanel, BrushSettings
+from .canvas_view import Point, Rect
 from .tool_panel import ToolPanel
 from .workspace import Workspace
 
@@ -28,6 +30,8 @@ class MainWindow:
         self._busy = False
         # 並排比較中的功能與它的輸入影像；調整參數重算時從同一張原圖開始
         self._comparison: tuple[str, Any] | None = None
+        # 等待後端處理的筆畫：(預覽 id, 點, 筆刷設定)；一次送一筆，依序處理
+        self._strokes: deque[tuple[int, list[Point], BrushSettings]] = deque()
 
         root.title("影像編輯軟體")
         root.geometry("1280x720")
@@ -63,6 +67,16 @@ class MainWindow:
         side = ttk.Frame(body, width=240)
         side.pack(side="right", fill="y")
         side.pack_propagate(False)
+        history = ttk.Frame(side)
+        history.pack(fill="x", padx=8, pady=(8, 0))
+        self._undo_button = ttk.Button(history, text="↶ 復原", command=self.undo)
+        self._redo_button = ttk.Button(history, text="↷ 重做", command=self.redo)
+        self._undo_button.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self._redo_button.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        self.brush_panel = BrushPanel(
+            side, on_tool_change=self._on_tool_change, on_settings_change=self._on_brush_change,
+        )
+        self.brush_panel.pack(fill="x", padx=8, pady=(8, 0))
         self.tool_panel = ToolPanel(side, on_apply=self.apply_filter)
         self.tool_panel.pack(fill="both", expand=True)
 
@@ -73,6 +87,7 @@ class MainWindow:
         )
         self.workspace.pack(side="left", fill="both", expand=True)
         self.canvas = self.workspace.main_canvas
+        self.canvas.on_stroke = self._queue_stroke
 
         self.status = tk.StringVar(value="就緒")
         self.selection_info = tk.StringVar(value="")
@@ -82,41 +97,77 @@ class MainWindow:
         ttk.Label(bar, textvariable=self.selection_info).pack(side="right")
 
     def _bind_keys(self) -> None:
-        self.root.bind("<Control-o>", lambda e: self.open_file())
-        self.root.bind("<Control-s>", lambda e: self.save_file())
-        self.root.bind("<Control-z>", lambda e: self.undo())
-        self.root.bind("<Control-y>", lambda e: self.redo())
+        shortcuts = {
+            "o": self.open_file,
+            "s": self.save_file,
+            "z": self.undo,
+            "y": self.redo,
+            "b": lambda: self.brush_panel.select_tool("brush"),
+            "e": lambda: self.brush_panel.select_tool("eraser"),
+            "m": lambda: self.brush_panel.select_tool("select"),
+        }
+        for key, action in shortcuts.items():
+            # 大小寫都綁，Caps Lock 開著時快捷鍵才不會失效
+            for k in (key, key.upper()):
+                self.root.bind(f"<Control-{k}>", lambda e, a=action: a())
         self.root.bind("<Escape>", lambda e: self.canvas.clear_selection())
 
     # ---- 背景工作（避免網路請求卡住 UI）----
-    def _run_async(self, work: Callable[[], Any], on_done: Callable[[Any], None], busy_text: str) -> None:
-        self._set_busy(True, busy_text)
+    def _run_async(
+        self, work: Callable[[], Any], on_done: Callable[[Any], None], busy_text: str, quiet: bool = False,
+    ) -> None:
+        """在背景執行 work。quiet 時不切換游標與按鈕狀態（筆刷每畫一筆就會呼叫，避免閃爍）。"""
+        self._set_busy(True, busy_text, quiet)
 
         def task() -> None:
             try:
                 result = work()
                 self._results.put(lambda: on_done(result))
-            except ApiError as e:
-                self._results.put(lambda: self._show_error(str(e)))
+            except Exception as e:  # noqa: BLE001 — 任何錯誤都要回報，不能讓 UI 卡在忙碌狀態
+                # 先轉成字串：except 區塊結束後 e 會被刪除，lambda 稍後才執行
+                msg = str(e) if isinstance(e, ApiError) else f"{type(e).__name__}: {e}"
+                self._results.put(lambda: self._on_task_error(msg))
             finally:
-                self._results.put(lambda: self._set_busy(False))
+                self._results.put(lambda: self._set_busy(False, quiet=quiet))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _poll_results(self) -> None:
-        while True:
-            try:
-                self._results.get_nowait()()
-            except queue.Empty:
-                break
-        self.root.after(50, self._poll_results)
+    def _on_task_error(self, msg: str) -> None:
+        self._strokes.clear()  # 後面排隊的筆畫多半也會失敗，不要連跳一堆錯誤
+        self._show_error(msg)
 
-    def _set_busy(self, busy: bool, text: str = "就緒") -> None:
+    def _poll_results(self) -> None:
+        try:
+            while True:
+                try:
+                    callback = self._results.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    callback()
+                except Exception as e:  # noqa: BLE001 — 單一回呼出錯不能讓輪詢停掉
+                    self._on_task_error(f"內部錯誤：{type(e).__name__}: {e}")
+            if not self._busy:
+                if self._strokes:
+                    self._start_next_stroke()
+                else:
+                    self.canvas.clear_previews()  # 失敗的筆畫留下的預覽
+            self._update_history_buttons()
+        finally:
+            self.root.after(50, self._poll_results)
+
+    def _update_history_buttons(self) -> None:
+        for button, enabled in ((self._undo_button, self.doc.can_undo()), (self._redo_button, self.doc.can_redo())):
+            button.state(["!disabled"] if enabled and self._idle else ["disabled"])
+
+    def _set_busy(self, busy: bool, text: str = "就緒", quiet: bool = False) -> None:
         self._busy = busy
-        self.tool_panel.set_enabled(not busy)
-        self.root.config(cursor="watch" if busy else "")
         if busy:
             self.status.set(text)
+        if quiet:
+            return
+        self.tool_panel.set_enabled(not busy)
+        self.root.config(cursor="watch" if busy else "")
 
     def _show_error(self, msg: str) -> None:
         self.status.set("發生錯誤")
@@ -124,11 +175,17 @@ class MainWindow:
 
     # ---- 動作 ----
     def _load_filters(self) -> None:
-        def done(filters: list[dict]) -> None:
+        def done(result: tuple[list[dict], list[dict]]) -> None:
+            filters, brushes = result
             self.tool_panel.load_filters(filters)
-            self.status.set(f"已連線後端，載入 {len(filters)} 個功能")
+            self.brush_panel.load_brushes(brushes)
+            self.status.set(f"已連線後端，載入 {len(filters)} 個功能、{len(brushes)} 種筆刷")
 
-        self._run_async(self.api.list_filters, done, "連線後端中...")
+        self._run_async(lambda: (self.api.list_filters(), self.api.list_brushes()), done, "連線後端中...")
+
+    @property
+    def _idle(self) -> bool:
+        return not self._busy and not self._strokes
 
     def open_file(self) -> None:
         path = filedialog.askopenfilename(parent=self.root, filetypes=FILETYPES)
@@ -160,7 +217,7 @@ class MainWindow:
         self.status.set(f"已儲存 {path}")
 
     def apply_filter(self, name: str, params: dict[str, Any]) -> None:
-        if self._busy:
+        if not self._idle:
             return
         if self.doc.image is None:
             messagebox.showinfo("提示", "請先開啟影像", parent=self.root)
@@ -190,16 +247,77 @@ class MainWindow:
         self._run_async(lambda: self.api.apply_filter(name, image, params, roi), done, "處理中...")
 
     def undo(self) -> None:
-        if self.doc.can_undo() and not self._busy:
+        if self.doc.can_undo() and self._idle:
             self.doc.undo()
             self._show_single()
             self.status.set("已復原")
 
     def redo(self) -> None:
-        if self.doc.can_redo() and not self._busy:
+        if self.doc.can_redo() and self._idle:
             self.doc.redo()
             self._show_single()
             self.status.set("已重做")
+
+    # ---- 筆刷 ----
+    def _on_tool_change(self, tool: str) -> None:
+        self.canvas.set_tool(tool)
+        if tool != "select" and self._comparison is not None:
+            self._show_single()  # 筆刷畫在目前的結果上，不是比較畫面的原圖
+
+    def _on_brush_change(self, settings: BrushSettings) -> None:
+        # 橡皮擦的預覽線用灰色
+        self.canvas.set_brush(settings.size, "#9e9e9e" if settings.erase else settings.color)
+
+    def _queue_stroke(self, points: list[Point]) -> None:
+        settings = self.brush_panel.settings
+        if self.doc.image is None or settings is None:
+            return
+        if self._comparison is not None:
+            self._show_single()
+        pid = self.canvas.add_preview(points)
+        self._strokes.append((pid, points, settings))
+
+    def _start_next_stroke(self) -> None:
+        """送出下一筆。只傳筆畫涵蓋的區塊（並限制在選取範圍內），結果再貼回原圖。"""
+        pid, points, s = self._strokes.popleft()
+        image = self.doc.image
+        pad = s.size / 2 + 2
+        x0 = max(0, int(min(x for x, _ in points) - pad))
+        y0 = max(0, int(min(y for _, y in points) - pad))
+        x1 = min(image.width, int(max(x for x, _ in points) + pad) + 1)
+        y1 = min(image.height, int(max(y for _, y in points) + pad) + 1)
+        if self.canvas.selection is not None:  # 有框選時只畫在範圍內
+            sx, sy, sw, sh = self.canvas.selection
+            x0, y0, x1, y1 = max(x0, sx), max(y0, sy), min(x1, sx + sw), min(y1, sy + sh)
+        if x0 >= x1 or y0 >= y1:
+            self.canvas.remove_preview(pid)
+            return
+
+        crop = image.crop((x0, y0, x1, y1))
+        local = [(x - x0, y - y0) for x, y in points]
+        source = None
+        if s.erase:  # 橡皮擦：把開檔時的原圖當成「顏料」畫回去
+            original = self.doc.original
+            if original is None or original.size != image.size:
+                self.canvas.remove_preview(pid)
+                self.status.set("沒有可以擦回的原圖")
+                return
+            source = original.crop((x0, y0, x1, y1)).convert(image.mode)
+
+        def done(painted) -> None:
+            self.canvas.remove_preview(pid)
+            if self.doc.image is not image:  # 期間開了別的檔案
+                return
+            new = image.copy()
+            new.paste(painted, (x0, y0))
+            self.doc.update(new)
+            self.canvas.set_image(self.doc.image, keep_selection=True)
+            self.status.set("就緒")
+
+        self._run_async(
+            lambda: self.api.apply_stroke(s.brush, crop, local, s.size, s.color, s.opacity, source),
+            done, "擦除中..." if s.erase else "繪製中...", quiet=True,
+        )
 
     def _show_single(self, keep_selection: bool = True) -> None:
         self._comparison = None

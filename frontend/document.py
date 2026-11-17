@@ -9,6 +9,8 @@ from PIL import Image
 class ImageDocument:
     def __init__(self, max_history: int = 30):
         self.image: Image.Image | None = None
+        #: 開檔時的原圖，橡皮擦會擦回這張圖
+        self.original: Image.Image | None = None
         self.path: Path | None = None
         self.max_history = max_history
         self._undo: list[Image.Image] = []
@@ -19,7 +21,7 @@ class ImageDocument:
         img.load()
         if img.mode not in ("RGB", "RGBA"):
             img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
-        self.image = img
+        self.image = self.original = img
         self.path = Path(path)
         self._undo.clear()
         self._redo.clear()

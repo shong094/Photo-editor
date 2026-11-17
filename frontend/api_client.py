@@ -41,6 +41,10 @@ class ApiClient:
                 detail = resp.json().get("detail", resp.text)
             except ValueError:
                 detail = resp.text
+            if resp.status_code == 422:  # 請求格式不符：通常是後端還在跑舊版程式
+                if isinstance(detail, list):
+                    detail = "\n".join(f"- {'.'.join(map(str, d.get('loc', [])))}: {d.get('msg')}" for d in detail)
+                raise ApiError(f"後端不接受這個請求，可能是後端版本較舊，請重新啟動後端。\n\n{detail}")
             raise ApiError(f"後端錯誤 {resp.status_code}：{detail}")
         return resp.json()
 
@@ -64,6 +68,28 @@ class ApiClient:
             views=[(v["label"], _decode(v["image"])) for v in data["views"]],
             result_label=data["result_label"],
         )
+
+    def list_brushes(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/api/brushes")
+
+    def apply_stroke(
+        self,
+        brush: str,
+        image: Image.Image,
+        points: list[tuple[float, float]],
+        size: int,
+        color: str | None,
+        opacity: float,
+        source: Image.Image | None = None,
+    ) -> Image.Image:
+        """畫一筆。color 為純色；改給 source（與 image 同尺寸）則畫出 source 的像素（橡皮擦）。"""
+        payload: dict[str, Any] = {"image": _encode(image), "points": points, "size": size, "opacity": opacity}
+        if source is not None:
+            payload["source"] = _encode(source)
+        else:
+            payload["color"] = color
+        data = self._request("POST", f"/api/brushes/{brush}/stroke", json=payload)
+        return _decode(data["image"])
 
 
 def _encode(image: Image.Image) -> str:

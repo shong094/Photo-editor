@@ -2,8 +2,8 @@
 from PyInstaller.utils.hooks import collect_submodules
 import os
 
-# filters 是動態載入的，要明確告訴 PyInstaller 收進去
-hiddenimports = collect_submodules("backend.filters")
+# filters、brushes 是動態載入的，要明確告訴 PyInstaller 收進去
+hiddenimports = collect_submodules("backend.filters") + collect_submodules("backend.brushes")
 
 # 用不到的大型模組，排除以縮小檔案
 excludes = [
