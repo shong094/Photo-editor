@@ -59,6 +59,20 @@ API 文件：後端啟動後開啟 http://127.0.0.1:8000/docs
 - 也可以在最左邊的原圖重新框選範圍。有框選時，濾波圖的範圍外為黑色。
 - 按「返回單圖編輯」回到單張畫面，並以疊加結果繼續編輯；「另存新檔」儲存的是疊加結果。
 
+### 製作 GIF
+
+「工具 > 製作 GIF...」（Ctrl+G）開啟獨立視窗，把多張圖片串成會動的 GIF：
+
+1. 把圖片拖進虛線框，或點擊選檔（可一次選多張，依檔名排序加入）
+   - PNG、JPEG、WebP、GIF（GIF 只取第一格）；單張最大 10MB；最多 50 張
+2. 在下方清單用 ↑ ↓ 調整順序、✕ 移除，每一幀可以設定各自的顯示時間（毫秒）
+   - 「所有幀的顯示時間」是新加入圖片的預設值；按「套用到所有幀」一次改全部
+3. 右側設定**循環播放**（無限／指定次數）與**輸出寬度**（留空則與第一張相同，高度依第一張的比例）
+   - 尺寸或比例不同的圖片會等比例縮放並置中，周圍留透明
+4. 按「建立 GIF」，右側會播放成品預覽，再按「下載 GIF」儲存
+
+加入圖片後右側就會先播放預覽；改了任何設定，需要重新按「建立 GIF」。
+
 ## 專案結構
 
 ```
@@ -67,12 +81,14 @@ backend/
   api/
     routes.py         功能路由（GET /api/filters、POST /api/filters/{name}）
     brush_routes.py   筆刷路由（GET /api/brushes、POST /api/brushes/{name}/stroke）
+    gif_routes.py     GIF 路由（GET /api/gif/limits、POST /api/gif）
     schemas.py        請求／回應格式
   core/
     base.py           ImageFilter 基底類別、ParamSpec 參數規格
     brush.py          Brush 基底類別、筆畫取樣與顏色合成
     registry.py       通用註冊表（功能用 @register，筆刷用 @register_brush）
     roi.py            只在選取範圍內套用功能
+    gif.py            多張圖片合成 GIF（尺寸統一、透明處理、循環次數、限制檢查）
     image_io.py       影像 <-> base64
   filters/
     median.py         中值濾波
@@ -90,6 +106,7 @@ frontend/
     canvas_view.py    影像顯示、滑鼠框選、筆刷預覽
     brush_panel.py    工具切換與筆刷設定（筆觸、大小、不透明度、顏色）
     tool_panel.py     依後端參數規格自動產生控制項
+    gif_maker.py      製作 GIF 視窗（拖放選檔、幀清單、預覽、下載）
 tests/
 ```
 
@@ -149,7 +166,7 @@ class SquareBrush(Brush):
 .venv\Scripts\python -m PyInstaller --noconfirm photo_editor.spec
 ```
 
-產生 `dist\PhotoEditor.exe`（約 33 MB，單一檔案，不需安裝 Python）。
+產生 `dist\PhotoEditor.exe`（約 34 MB，單一檔案，不需安裝 Python）。
 
 執行檔的進入點是 [launcher.py](launcher.py)：它在背景執行緒啟動後端（隨機的本機埠），再開啟前端視窗，前後端仍透過 HTTP 溝通。
 排查啟動錯誤時，可設定 `PYI_CONSOLE=1` 再打包，會產生帶主控台視窗的版本以顯示錯誤訊息。

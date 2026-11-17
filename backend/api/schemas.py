@@ -50,3 +50,21 @@ class StrokeRequest(BaseModel):
 
 class StrokeResponse(BaseModel):
     image: str = Field(description="base64 編碼的 PNG")
+
+
+class GifFrameModel(BaseModel):
+    image: str = Field(description="base64 編碼的原始圖檔 (PNG/JPEG/WebP/GIF)")
+    duration: int = Field(description="這一幀的顯示時間（毫秒）")
+
+
+class GifRequest(BaseModel):
+    frames: list[GifFrameModel] = Field(min_length=1)
+    play_count: int | None = Field(default=None, description="播放次數；省略為無限循環")
+    width: int | None = Field(default=None, description="輸出寬度；省略則與第一張相同")
+
+
+class GifResponse(BaseModel):
+    gif: str = Field(description="base64 編碼的 GIF")
+    width: int
+    height: int
+    frame_count: int

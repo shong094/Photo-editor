@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 
 from . import brushes, filters
-from .api import brush_routes
+from .api import brush_routes, gif_routes
 from .api.routes import router
 
 
@@ -12,6 +12,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="影像編輯軟體 API")
     app.include_router(router)
     app.include_router(brush_routes.router)
+    app.include_router(gif_routes.router)
     return app
 
 

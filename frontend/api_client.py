@@ -23,6 +23,14 @@ class FilterResult:
     result_label: str
 
 
+@dataclass
+class GifCreated:
+    data: bytes  # GIF 檔案內容
+    width: int
+    height: int
+    frame_count: int
+
+
 class ApiClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8000", timeout: float = 120):
         self.base_url = base_url.rstrip("/")
@@ -90,6 +98,24 @@ class ApiClient:
             payload["color"] = color
         data = self._request("POST", f"/api/brushes/{brush}/stroke", json=payload)
         return _decode(data["image"])
+
+    def gif_limits(self) -> dict[str, Any]:
+        return self._request("GET", "/api/gif/limits")
+
+    def make_gif(
+        self,
+        frames: list[tuple[bytes, int]],
+        play_count: int | None = None,
+        width: int | None = None,
+    ) -> GifCreated:
+        """frames：(原始圖檔內容, 顯示毫秒) 依播放順序。play_count 為 None 表示無限循環。"""
+        payload = {
+            "frames": [{"image": base64.b64encode(data).decode("ascii"), "duration": d} for data, d in frames],
+            "play_count": play_count,
+            "width": width,
+        }
+        data = self._request("POST", "/api/gif", json=payload)
+        return GifCreated(base64.b64decode(data["gif"]), data["width"], data["height"], data["frame_count"])
 
 
 def _encode(image: Image.Image) -> str:

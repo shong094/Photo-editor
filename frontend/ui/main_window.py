@@ -12,6 +12,7 @@ from ..api_client import ApiClient, ApiError, FilterResult
 from ..document import ImageDocument
 from .brush_panel import BrushPanel, BrushSettings
 from .canvas_view import Point, Rect
+from .gif_maker import GifMakerWindow
 from .tool_panel import ToolPanel
 from .workspace import Workspace
 
@@ -32,6 +33,7 @@ class MainWindow:
         self._comparison: tuple[str, Any] | None = None
         # 等待後端處理的筆畫：(預覽 id, 點, 筆刷設定)；一次送一筆，依序處理
         self._strokes: deque[tuple[int, list[Point], BrushSettings]] = deque()
+        self._gif_maker: GifMakerWindow | None = None
 
         root.title("影像編輯軟體")
         root.geometry("1280x720")
@@ -57,6 +59,10 @@ class MainWindow:
         edit_menu.add_separator()
         edit_menu.add_command(label="取消選取", accelerator="Esc", command=lambda: self.canvas.clear_selection())
         menubar.add_cascade(label="編輯", menu=edit_menu)
+
+        tools_menu = tk.Menu(menubar, tearoff=False)
+        tools_menu.add_command(label="製作 GIF...", accelerator="Ctrl+G", command=self.open_gif_maker)
+        menubar.add_cascade(label="工具", menu=tools_menu)
         self.root.config(menu=menubar)
 
     def _build_layout(self) -> None:
@@ -105,6 +111,7 @@ class MainWindow:
             "b": lambda: self.brush_panel.select_tool("brush"),
             "e": lambda: self.brush_panel.select_tool("eraser"),
             "m": lambda: self.brush_panel.select_tool("select"),
+            "g": self.open_gif_maker,
         }
         for key, action in shortcuts.items():
             # 大小寫都綁，Caps Lock 開著時快捷鍵才不會失效
@@ -245,6 +252,15 @@ class MainWindow:
             self.status.set("處理完成")
 
         self._run_async(lambda: self.api.apply_filter(name, image, params, roi), done, "處理中...")
+
+    def open_gif_maker(self) -> None:
+        """開啟製作 GIF 視窗；已開啟時移到最前面。"""
+        if self._gif_maker is not None and self._gif_maker.winfo_exists():
+            self._gif_maker.deiconify()
+            self._gif_maker.lift()
+            self._gif_maker.focus_force()
+            return
+        self._gif_maker = GifMakerWindow(self.root, self.api)
 
     def undo(self) -> None:
         if self.doc.can_undo() and self._idle:

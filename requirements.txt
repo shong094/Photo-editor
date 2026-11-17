@@ -4,3 +4,4 @@ pydantic>=2.0
 numpy>=1.26
 Pillow>=10.0
 requests>=2.31
+tkinterdnd2>=0.4  # 製作 GIF 視窗的拖放；沒有也能用（改成只能點擊選檔）
