@@ -10,7 +10,7 @@ from typing import Callable
 
 from PIL import Image
 
-from .canvas_view import ImageCanvas, Rect
+from .canvas_view import ImageCanvas, PixelSample, Rect
 
 ORIGINAL_LABEL = "原圖"
 
@@ -21,6 +21,7 @@ class Workspace(ttk.Frame):
         master: tk.Misc,
         on_selection_change: Callable[[Rect | None], None],
         on_close_comparison: Callable[[], None],
+        on_pixel_hover: Callable[[PixelSample | None], None] | None = None,
     ):
         super().__init__(master)
         self.rowconfigure(2, weight=1)
@@ -28,7 +29,9 @@ class Workspace(ttk.Frame):
         self._extra: list[tk.Widget] = []
         self._column_count = 1
 
-        self.main_canvas = ImageCanvas(self, on_selection_change=on_selection_change)
+        self.main_canvas = ImageCanvas(
+            self, on_selection_change=on_selection_change, on_pixel_hover=on_pixel_hover,
+        )
         self.main_canvas.grid(row=2, column=0, sticky="nsew")
 
         self._close_button = ttk.Button(self, text="返回單圖編輯", command=on_close_comparison)

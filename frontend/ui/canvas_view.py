@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 
 Rect = tuple[int, int, int, int]  # (x, y, width, height)
 Point = tuple[float, float]
+PixelSample = tuple[int, int, tuple[int, int, int]]  # (x, y, (r, g, b))
 
 
 class ImageCanvas(tk.Canvas):
@@ -20,18 +21,21 @@ class ImageCanvas(tk.Canvas):
         self,
         master: tk.Misc,
         on_selection_change: Callable[[Rect | None], None] | None = None,
+        on_pixel_hover: Callable[[PixelSample | None], None] | None = None,
         selectable: bool = True,
     ):
         super().__init__(
             master, bg="#2b2b2b", highlightthickness=0, cursor="crosshair" if selectable else "",
         )
         self.on_selection_change = on_selection_change
+        self.on_pixel_hover = on_pixel_hover
         self._image: Image.Image | None = None
         self._photo: ImageTk.PhotoImage | None = None
         self._scale = 1.0
         self._offset = (0, 0)
         self._drag_start: tuple[int, int] | None = None
         self._selection: Rect | None = None
+        self._pixel_tracking = False
 
         # 筆刷
         self.on_stroke: Callable[[list[Point]], None] | None = None
@@ -49,8 +53,8 @@ class ImageCanvas(tk.Canvas):
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Button-3>", lambda e: self.clear_selection())
-        self.bind("<Motion>", self._draw_brush_cursor)
-        self.bind("<Leave>", lambda e: self.delete("brush_cursor"))
+        self.bind("<Motion>", self._on_motion)
+        self.bind("<Leave>", lambda e: self._on_leave())
 
     # ---- 公開介面 ----
     def set_image(self, image: Image.Image | None, keep_selection: bool = False) -> None:
@@ -75,6 +79,12 @@ class ImageCanvas(tk.Canvas):
     def set_brush(self, size: int, color: str) -> None:
         self._brush_size = size
         self._brush_color = color
+
+    def set_pixel_tracking(self, enabled: bool) -> None:
+        """啟用或停用滑鼠移動時的像素值回報。"""
+        self._pixel_tracking = enabled
+        if not enabled:
+            self._report_pixel(None)
 
     def add_preview(self, points: list[Point]) -> int:
         """保留一條預覽筆畫直到 remove_preview()，期間重畫也會保留。"""
@@ -111,6 +121,23 @@ class ImageCanvas(tk.Canvas):
     def _to_canvas(self, x: float, y: float) -> tuple[float, float]:
         ox, oy = self._offset
         return x * self._scale + ox, y * self._scale + oy
+
+    def _pixel_at_canvas(self, cx: float, cy: float) -> PixelSample | None:
+        """回傳滑鼠所在位置的影像像素；不在影像範圍內時回傳 None。"""
+        if self._image is None:
+            return None
+        ox, oy = self._offset
+        x = int((cx - ox) / self._scale)
+        y = int((cy - oy) / self._scale)
+        w, h = self._image.size
+        if not (0 <= x < w and 0 <= y < h):
+            return None
+        pixel = self._image.getpixel((x, y))
+        if isinstance(pixel, int):
+            rgb = (pixel, pixel, pixel)
+        else:
+            rgb = tuple(pixel[:3])
+        return x, y, rgb
 
     # ---- 繪圖 ----
     def _redraw(self) -> None:
@@ -168,7 +195,21 @@ class ImageCanvas(tk.Canvas):
             self.create_oval(event.x - d, event.y - d, event.x + d, event.y + d,
                              outline=color, tags="brush_cursor")
 
+    def _report_pixel(self, sample: PixelSample | None) -> None:
+        if self.on_pixel_hover:
+            self.on_pixel_hover(sample)
+
     # ---- 滑鼠事件 ----
+    def _on_motion(self, event: tk.Event) -> None:
+        self._draw_brush_cursor(event)
+        if self._pixel_tracking:
+            self._report_pixel(self._pixel_at_canvas(event.x, event.y))
+
+    def _on_leave(self) -> None:
+        self.delete("brush_cursor")
+        if self._pixel_tracking:
+            self._report_pixel(None)
+
     def _on_press(self, event: tk.Event) -> None:
         if self._image is None:
             return

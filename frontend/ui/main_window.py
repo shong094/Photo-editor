@@ -11,7 +11,7 @@ from typing import Any, Callable
 from ..api_client import ApiClient, ApiError, FilterResult
 from ..document import ImageDocument
 from .brush_panel import BrushPanel, BrushSettings
-from .canvas_view import Point, Rect
+from .canvas_view import PixelSample, Point, Rect
 from .gif_maker import GifMakerWindow
 from .tool_panel import ToolPanel
 from .workspace import Workspace
@@ -34,6 +34,7 @@ class MainWindow:
         # 等待後端處理的筆畫：(預覽 id, 點, 筆刷設定)；一次送一筆，依序處理
         self._strokes: deque[tuple[int, list[Point], BrushSettings]] = deque()
         self._gif_maker: GifMakerWindow | None = None
+        self._pixel_tracking = False
 
         root.title("影像編輯軟體")
         root.geometry("1280x720")
@@ -75,6 +76,12 @@ class MainWindow:
         self._redo_button = ttk.Button(history, text="↷ 重做", command=self.redo)
         self._undo_button.pack(side="left", fill="x", expand=True, padx=(0, 2))
         self._redo_button.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        pixel = ttk.Frame(side)
+        pixel.pack(fill="x", padx=8, pady=(8, 0))
+        self._pixel_button = ttk.Button(
+            pixel, text="即時顯示像素值：關", command=self.toggle_pixel_tracking,
+        )
+        self._pixel_button.pack(fill="x")
         self.brush_panel = BrushPanel(
             side, on_tool_change=self._on_tool_change, on_settings_change=self._on_brush_change,
         )
@@ -91,16 +98,19 @@ class MainWindow:
             body,
             on_selection_change=self._on_selection_change,
             on_close_comparison=self._show_single,
+            on_pixel_hover=self._on_pixel_hover,
         )
         self.workspace.pack(side="left", fill="both", expand=True)
         self.canvas = self.workspace.main_canvas
         self.canvas.on_stroke = self._queue_stroke
 
         self.status = tk.StringVar(value="就緒")
+        self.pixel_info = tk.StringVar(value="")
         self.selection_info = tk.StringVar(value="")
         bar = ttk.Frame(self.root, relief="sunken", padding=(6, 2))
         bar.pack(fill="x", side="bottom")
         ttk.Label(bar, textvariable=self.status).pack(side="left")
+        ttk.Label(bar, textvariable=self.pixel_info).pack(side="left", padx=(16, 0))
         ttk.Label(bar, textvariable=self.selection_info).pack(side="right")
 
     def _bind_keys(self) -> None:
@@ -263,6 +273,17 @@ class MainWindow:
             return
         self._gif_maker = GifMakerWindow(self.root, self.api)
 
+    def toggle_pixel_tracking(self) -> None:
+        """切換滑鼠移到影像上時是否即時顯示 RGB 像素值。"""
+        self._pixel_tracking = not self._pixel_tracking
+        self.canvas.set_pixel_tracking(self._pixel_tracking)
+        if self._pixel_tracking:
+            self._pixel_button.config(text="即時顯示像素值：開")
+            self.pixel_info.set("像素值：移動到影像上查看 RGB")
+        else:
+            self._pixel_button.config(text="即時顯示像素值：關")
+            self.pixel_info.set("")
+
     def undo(self) -> None:
         if self.doc.can_undo() and self._idle:
             self.doc.undo()
@@ -346,3 +367,12 @@ class MainWindow:
         else:
             x, y, w, h = rect
             self.selection_info.set(f"選取範圍：({x}, {y})  {w}x{h}")
+
+    def _on_pixel_hover(self, sample: PixelSample | None) -> None:
+        if not self._pixel_tracking:
+            return
+        if sample is None:
+            self.pixel_info.set("像素值：不在影像上")
+            return
+        x, y, (r, g, b) = sample
+        self.pixel_info.set(f"像素值：({x}, {y})  RGB=({r}, {g}, {b})")
